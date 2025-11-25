@@ -144,6 +144,10 @@ for message in st.session_state.messages:
     with st.chat_message(message["role"]):
         st.markdown(message["content"])
 
+# [app.py의 마지막 부분 - 기존 코드를 지우고 이걸로 덮어쓰세요]
+
+# ... (위쪽 코드는 그대로 유지) ...
+
 # 사용자 입력 처리
 if user_input := st.chat_input("메시지를 입력하세요..."):
     # 1. 사용자 메시지 표시
@@ -160,20 +164,26 @@ if user_input := st.chat_input("메시지를 입력하세요..."):
     with st.chat_message("assistant"):
         message_placeholder = st.empty()
         
-        # --- [디버깅 기능] RAG 검색 결과 미리보기 ---
-        # 챗봇이 대답하기 전에 무엇을 읽었는지 확인
-        try:
-            retrieved_docs = retriever.invoke(user_input)
-            with st.expander(f"🔍 '{target_char}'가 읽은 소설 내용 확인하기 (클릭)"):
-                if retrieved_docs:
-                    for i, doc in enumerate(retrieved_docs):
-                        st.markdown(f"**[참고 {i+1}]**")
-                        st.caption(doc.page_content[:300] + "...") # 너무 길면 자름
-                else:
-                    st.warning("⚠️ 관련된 소설 내용을 찾지 못했습니다.")
-        except Exception as e:
-            st.error(f"검색 중 오류: {e}")
-        # ---------------------------------------------
+        # --- [진단 기능] 챗봇이 읽은 내용(Context) 미리보기 ---
+        # AI가 답변하기 전에 소설에서 무엇을 찾아왔는지 먼저 보여줍니다.
+        with st.spinner("📖 소설 책장을 넘기는 중..."):
+            try:
+                # 검색 실행
+                retrieved_docs = retriever.invoke(user_input)
+                
+                # '참고 자료'를 접었다 폈다 할 수 있는 상자에 표시
+                with st.expander(f"🔍 '{target_char}'가 참고한 소설 내용 보기 (클릭)", expanded=False):
+                    if retrieved_docs:
+                        for i, doc in enumerate(retrieved_docs):
+                            st.markdown(f"**[문단 {i+1}]**")
+                            # 내용이 너무 길면 300자까지만 보여줌
+                            st.caption(doc.page_content[:300] + "...") 
+                            st.divider()
+                    else:
+                        st.warning("⚠️ 검색된 내용이 없습니다! (DB가 비었거나 관련 내용 없음)")
+            except Exception as e:
+                st.error(f"검색 중 오류 발생: {e}")
+        # ----------------------------------------------------
 
         # 체인 실행
         chain = get_rag_chain()
@@ -186,7 +196,7 @@ if user_input := st.chat_input("메시지를 입력하세요..."):
         
         config = {"configurable": {"session_id": "streamlit_session"}}
         
-        with st.spinner(f"{target_char}(이)가 생각 중..."):
+        with st.spinner(f"{target_char}(이)가 대답을 생각 중..."):
             try:
                 response = chain_with_history.invoke(
                     {"input": user_input}, 
