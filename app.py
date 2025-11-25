@@ -1,17 +1,11 @@
 import streamlit as st
 import os
 
-# --- 1. 기본 설정 및 화면 구성 ---
+# --- 1. 기본 설정 ---
 st.set_page_config(page_title="소설 캐릭터 챗봇", page_icon="📚")
 st.title("📚 소설 속 캐릭터와 대화하기")
 
-# 로딩 상태 표시를 위한 공간
-status_container = st.empty()
-
-# --- 2. 라이브러리 임포트 (무거운 작업) ---
-if "imports_done" not in st.session_state:
-    status_container.info("🚀 시스템 초기화 중... (AI 모델 로딩)")
-
+# --- 2. 라이브러리 임포트 ---
 from operator import itemgetter
 from langchain_openai import ChatOpenAI
 from langchain_community.vectorstores import FAISS
@@ -21,10 +15,6 @@ from langchain_core.runnables import RunnablePassthrough
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.runnables.history import RunnableWithMessageHistory
 from langchain_community.chat_message_histories import ChatMessageHistory
-
-st.session_state.imports_done = True
-status_container.empty() # 로딩 문구 삭제
-
 
 # --- 3. 사이드바 설정 ---
 with st.sidebar:
@@ -36,8 +26,9 @@ with st.sidebar:
         os.environ["OPENAI_API_KEY"] = api_key
     
     # 모델 선택
-    model_name = "gpt-3.5-turbo"
-    # model_name = "ft:gpt-3.5-turbo:your-org:xxxx" # 파인튜닝 모델이 있다면 주석 해제
+    # MODEL_NAME = "gpt-3.5-turbo"
+    # 파인튜닝된 모델이 있다면 아래 주석을 풀고 모델 ID를 적으세요
+    MODEL_NAME = "gpt-3.5-turbo" 
     
     st.divider()
     
@@ -52,7 +43,6 @@ with st.sidebar:
         st.session_state.store = {}
         st.rerun()
 
-
 # --- 4. 데이터베이스(FAISS) 로드 ---
 @st.cache_resource
 def load_db():
@@ -61,47 +51,46 @@ def load_db():
     if not os.path.exists(DB_PATH):
         return None
         
+    # 임베딩 모델 로드
     embedding_function = HuggingFaceEmbeddings(
         model_name="sentence-transformers/all-MiniLM-L6-v2"
     )
     
+    # FAISS DB 로드
     try:
         vectorstore = FAISS.load_local(
             DB_PATH, 
             embedding_function, 
             allow_dangerous_deserialization=True
         )
-        return vectorstore.as_retriever(search_kwargs={"k": 3}) # 관련 내용 3개 검색
+        return vectorstore.as_retriever(search_kwargs={"k": 3})
     except Exception as e:
         return None
 
 retriever = load_db()
 
-# DB가 없을 경우 경고
+# DB 오류 체크
 if not retriever:
-    st.error("❌ 데이터베이스를 찾을 수 없습니다!")
-    st.warning("👉 프로젝트 폴더에 'novel_db_faiss' 폴더가 있는지 확인하세요.")
-    st.info("💡 해결법: 터미널에서 'python novel_ingest.py'를 실행하여 소설을 먼저 저장해야 합니다.")
+    st.error("❌ 'novel_db_faiss' 폴더를 찾을 수 없습니다!")
+    st.info("터미널에서 'python novel_ingest.py'를 실행하여 소설을 먼저 저장해주세요.")
     st.stop()
 
-
-# --- 5. 체인 생성 함수 ---
+# --- 5. 체인 생성 ---
 def get_rag_chain():
-    llm = ChatOpenAI(model=model_name, temperature=0.7)
+    llm = ChatOpenAI(model=MODEL_NAME, temperature=0.7)
 
-    # 소설 내용을 강제로 참고하도록 프롬프트 강화
     system_template = f"""
     당신은 소설 속에 등장하는 '{target_char}'입니다.
     현재 당신은 '{user_role}'와 대화하고 있습니다.
 
-    아래 [참고한 소설 내용]을 바탕으로 대답하세요.
-    소설에 없는 내용은 지어내지 말고, 캐릭터의 말투와 성격을 유지하세요.
-
+    반드시 아래 [소설 내용]을 참고하여 대답하세요.
+    소설에 없는 내용은 지어내지 말고, 모르면 모른다고 하세요.
+    
     [지침]
-    1. 답변은 2~3문장으로 간결하게 하세요.
-    2. 소설 속 상황을 자연스럽게 언급하세요.
+    1. 답변은 2~3문장 이내로 간결하게 하세요.
+    2. 소설 속 어투를 유지하세요.
 
-    [참고한 소설 내용]
+    [소설 내용]
     {{context}}
     """
 
@@ -124,7 +113,6 @@ def get_rag_chain():
     )
     return rag_chain
 
-
 # --- 6. 세션 관리 ---
 if "messages" not in st.session_state:
     st.session_state.messages = []
@@ -137,16 +125,12 @@ def get_session_history(session_id: str):
         st.session_state.store[session_id] = ChatMessageHistory()
     return st.session_state.store[session_id]
 
+# --- 7. 채팅 화면 구현 ---
 
-# --- 7. 채팅 UI ---
 # 이전 대화 출력
 for message in st.session_state.messages:
     with st.chat_message(message["role"]):
         st.markdown(message["content"])
-
-# [app.py의 마지막 부분 - 기존 코드를 지우고 이걸로 덮어쓰세요]
-
-# ... (위쪽 코드는 그대로 유지) ...
 
 # 사용자 입력 처리
 if user_input := st.chat_input("메시지를 입력하세요..."):
@@ -164,28 +148,23 @@ if user_input := st.chat_input("메시지를 입력하세요..."):
     with st.chat_message("assistant"):
         message_placeholder = st.empty()
         
-        # --- [진단 기능] 챗봇이 읽은 내용(Context) 미리보기 ---
-        # AI가 답변하기 전에 소설에서 무엇을 찾아왔는지 먼저 보여줍니다.
-        with st.spinner("📖 소설 책장을 넘기는 중..."):
-            try:
-                # 검색 실행
-                retrieved_docs = retriever.invoke(user_input)
-                
-                # '참고 자료'를 접었다 폈다 할 수 있는 상자에 표시
-                with st.expander(f"🔍 '{target_char}'가 참고한 소설 내용 보기 (클릭)", expanded=False):
-                    if retrieved_docs:
-                        for i, doc in enumerate(retrieved_docs):
-                            st.markdown(f"**[문단 {i+1}]**")
-                            # 내용이 너무 길면 300자까지만 보여줌
-                            st.caption(doc.page_content[:300] + "...") 
-                            st.divider()
-                    else:
-                        st.warning("⚠️ 검색된 내용이 없습니다! (DB가 비었거나 관련 내용 없음)")
-            except Exception as e:
-                st.error(f"검색 중 오류 발생: {e}")
-        # ----------------------------------------------------
+        # --- ✅ [디버깅 기능] 여기가 중요합니다! ---
+        # 챗봇이 답변하기 전에 검색된 내용을 먼저 보여줍니다.
+        try:
+            retrieved_docs = retriever.invoke(user_input)
+            
+            with st.expander(f"🔍 '{target_char}'가 읽은 소설 내용 확인하기 (클릭)"):
+                if retrieved_docs:
+                    for i, doc in enumerate(retrieved_docs):
+                        st.markdown(f"**[참고 문단 {i+1}]**")
+                        st.info(doc.page_content) # 파란색 박스로 내용 표시
+                else:
+                    st.warning("⚠️ 검색된 소설 내용이 없습니다. (DB가 비었거나 관련 내용 없음)")
+        except Exception as e:
+            st.error(f"검색 중 오류 발생: {e}")
+        # ----------------------------------------
 
-        # 체인 실행
+        # 체인 실행 및 응답 표시
         chain = get_rag_chain()
         chain_with_history = RunnableWithMessageHistory(
             chain,
@@ -196,7 +175,7 @@ if user_input := st.chat_input("메시지를 입력하세요..."):
         
         config = {"configurable": {"session_id": "streamlit_session"}}
         
-        with st.spinner(f"{target_char}(이)가 대답을 생각 중..."):
+        with st.spinner("답변 생성 중..."):
             try:
                 response = chain_with_history.invoke(
                     {"input": user_input}, 
@@ -205,4 +184,4 @@ if user_input := st.chat_input("메시지를 입력하세요..."):
                 message_placeholder.markdown(response)
                 st.session_state.messages.append({"role": "assistant", "content": response})
             except Exception as e:
-                st.error(f"답변 생성 오류: {e}")
+                st.error(f"오류 발생: {e}")
